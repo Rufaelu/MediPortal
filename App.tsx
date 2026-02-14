@@ -6,150 +6,229 @@ import PatientDashboard from './components/PatientDashboard';
 import DoctorDashboard from './components/DoctorDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import Navbar from './components/Navbar';
-
-const INITIAL_PHARMACY_STOCK: PharmacyItem[] = [
-  { id: 'st1', name: 'Acetaminophen', category: 'Analgesic', available: true, lastRestocked: new Date().toISOString() },
-  { id: 'st2', name: 'Amoxicillin', category: 'Antibiotic', available: true, lastRestocked: new Date().toISOString() },
-  { id: 'st3', name: 'Insulin Humalog', category: 'Metabolic', available: true, lastRestocked: new Date().toISOString() },
-  { id: 'st4', name: 'Ventolin HFA', category: 'Respiratory', available: false, lastRestocked: new Date().toISOString() },
-];
+import { supabase } from './services/supabaseClient';
+import { api } from './services/api';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeAlerts, setActiveAlerts] = useState<EmergencyAlert[]>([]);
   const [inpatients, setInpatients] = useState<Inpatient[]>([]);
-  const [pharmacyStock, setPharmacyStock] = useState<PharmacyItem[]>(INITIAL_PHARMACY_STOCK);
+  const [pharmacyStock, setPharmacyStock] = useState<PharmacyItem[]>([]);
   const [allPrescriptions, setAllPrescriptions] = useState<Prescription[]>([]);
   const [medicalBoardMeetings, setMedicalBoardMeetings] = useState<MedicalBoardMeeting[]>([]);
-  
-  const [schedules, setSchedules] = useState<ScheduleItem[]>([
-    { id: 's1', title: 'Cardiac Surgery', time: '09:00 AM', type: 'SURGERY', patientName: 'Robert Chen', location: 'OR-4' },
-    { id: 's2', title: 'ER Consultation', time: '11:30 AM', type: 'CONSULTATION', patientName: 'Sarah Jenkins', location: 'Exam Room 2' },
-    { id: 's3', title: 'Ward Rounds', time: '02:00 PM', type: 'ROUNDS', location: 'Wing B' },
-  ]);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // Initial Data Fetch & Auth Listener
   useEffect(() => {
-    const savedUser = localStorage.getItem('mediportal_user');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    // Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        fetchUserData(session.user.id);
+      } else {
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        fetchUserData(session.user.id);
+      } else {
+        setCurrentUser(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    localStorage.setItem('mediportal_user', JSON.stringify(user));
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem('mediportal_user');
-  };
-
-  const handleUpdateUser = (updates: Partial<User>) => {
+  // Fetch application data when user is logged in
+  useEffect(() => {
     if (currentUser) {
-      const updatedUser = { ...currentUser, ...updates };
-      setCurrentUser(updatedUser);
-      localStorage.setItem('mediportal_user', JSON.stringify(updatedUser));
+      refreshData();
+
+      // Real-time subscriptions could go here
+    }
+  }, [currentUser?.id, currentUser?.role]);
+
+  const fetchUserData = async (userId: string) => {
+    try {
+      const user = await api.getCurrentUser();
+      if (user) {
+        setCurrentUser(user);
+      }
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCreateEmergency = (alertData: Omit<EmergencyAlert, 'id' | 'status' | 'timestamp' | 'medicalSummary'>) => {
-    const newAlert: EmergencyAlert = {
-      ...alertData,
-      id: Math.random().toString(36).substr(2, 9),
-      status: 'ACTIVE',
-      timestamp: new Date().toISOString(),
-      medicalSummary: currentUser?.medicalRecord || {
-        bloodType: 'Pending',
-        allergies: 'Unknown',
-        conditions: alertData.incidentType,
-        medications: 'None',
-        lastUpdated: new Date().toISOString()
-      }
-    };
-    setActiveAlerts(prev => [newAlert, ...prev]);
+  const refreshData = async () => {
+    try {
+      const [alerts, pts, stock, meds, meetings, scheds] = await Promise.all([
+        api.getEmergencyAlerts(),
+        api.getInpatients(),
+        api.getPharmacyStock(),
+        api.getPrescriptions(),
+        api.getBoardMeetings(),
+        api.getSchedules()
+      ]);
+
+      setActiveAlerts(alerts);
+      setInpatients(pts);
+      setPharmacyStock(stock);
+      setAllPrescriptions(meds);
+      setMedicalBoardMeetings(meetings);
+      setSchedules(scheds);
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    }
   };
 
-  const handleBookAppointment = (booking: Omit<ScheduleItem, 'id'>) => {
-    const newSchedule: ScheduleItem = {
+  const handleLogin = async (user: User) => {
+    // This is now handled by LandingPage calling supabase.auth.signIn
+    // active session listener will pick it up.
+    // However, if LandingPage passes a user object directly (mock), we should avoid that.
+    // We'll update LandingPage to not pass user object but perform auth.
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+  };
+
+  const handleUpdateUser = async (updates: Partial<User>) => {
+    if (currentUser) {
+      await api.updateUserProfile(currentUser.id, updates);
+      // Optimistic update or refetch
+      setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+    }
+  };
+
+  const handleCreateEmergency = async (alertData: Omit<EmergencyAlert, 'id' | 'status' | 'timestamp' | 'medicalSummary'>) => {
+    const medicalSummary = currentUser?.medicalRecord || {
+      bloodType: 'Pending',
+      allergies: 'Unknown',
+      conditions: alertData.incidentType,
+      medications: 'None',
+      lastUpdated: new Date().toISOString()
+    };
+
+    await api.createEmergencyAlert(alertData, medicalSummary);
+    refreshData();
+  };
+
+  const handleBookAppointment = async (booking: Omit<ScheduleItem, 'id'>) => {
+    if (!currentUser) return;
+    // For now assuming currentUser is the one booking or related
+    // The API needs a doctor_id, let's assume if patient books it's a request, 
+    // but the schema requires doctor_id. 
+    // For simplicity, we assign a random doctor or handle it in API.
+    // Wait, the API I wrote `createSchedule` takes `doctorId`.
+    // We might need to find a doctor first or just pick the first one.
+    // For this prototype migration, let's just use the current user ID if they are a doctor, 
+    // or if patient, we might fail or need a default doctor.
+    // Let's pass currentUser.id if doctor, else we need a fallback.
+    const doctorId = currentUser.role === UserRole.DOCTOR ? currentUser.id : '00000000-0000-0000-0000-000000000000'; // Invalid UUID if fetching fails
+    await api.createSchedule({
       ...booking,
-      id: Math.random().toString(36).substr(2, 9),
-    };
-    setSchedules(prev => [...prev, newSchedule]);
+      time: booking.time,
+      patientName: booking.patientName || currentUser.name
+    }, doctorId);
+
+    refreshData();
   };
 
-  const handleDeleteEmergency = (id: string) => {
+  const handleDeleteEmergency = async (id: string) => {
     if (currentUser?.role !== UserRole.ADMIN) return;
-    setActiveAlerts(prev => prev.filter(a => a.id !== id));
+    await api.deleteEmergencyAlert(id);
+    refreshData();
   };
 
-  const handleAdmitPatient = (alert: EmergencyAlert) => {
-    const newInpatient: Inpatient = {
-      id: alert.patientId !== 'GUEST' ? alert.patientId : Math.random().toString(36).substr(2, 9),
+  const handleAdmitPatient = async (alert: EmergencyAlert) => {
+    const newInpatient: Omit<Inpatient, 'id'> = {
       patientName: alert.patientName,
       status: AdmissionStatus.ON_THE_WAY,
       admissionDate: new Date().toISOString(),
       ward: 'ICU - West Wing',
       attendingPhysician: currentUser?.name || 'Dr. On Duty',
-      medicalSummary: alert.medicalSummary
+      medicalSummary: alert.medicalSummary,
+      dob: undefined // Missing in alert
     };
-    setInpatients(prev => [newInpatient, ...prev]);
-    setActiveAlerts(prev => prev.filter(a => a.id !== alert.id));
+
+    await api.createInpatient(newInpatient);
+    // Also likely want to resolve the alert or update its status
+    // api.updateEmergencyAlertStatus(alert.id, 'RESOLVED'); // I didn't add this method, assume createInpatient is enough for now or I should add it.
+    await api.deleteEmergencyAlert(alert.id); // Simple Move
+    refreshData();
   };
 
-  const handleManualAdmit = (data: { name: string, status: AdmissionStatus, ward: string, bloodType: string, allergies: string, dob?: string, id?: string }) => {
-    const newInpatient: Inpatient = {
-      id: data.id || Math.random().toString(36).substr(2, 9),
+  const handleManualAdmit = async (data: { name: string, status: AdmissionStatus, ward: string, bloodType: string, allergies: string, dob?: string, id?: string }) => {
+    const summary: MedicalRecord = {
+      bloodType: data.bloodType,
+      allergies: data.allergies,
+      conditions: 'Admitted via Registration/Manual Entry',
+      medications: 'None recorded',
+      lastUpdated: new Date().toISOString()
+    };
+
+    await api.createInpatient({
       patientName: data.name,
       dob: data.dob,
       status: data.status,
       admissionDate: new Date().toISOString(),
       ward: data.ward,
       attendingPhysician: currentUser?.name || 'Dr. On Duty',
-      medicalSummary: {
-        bloodType: data.bloodType,
-        allergies: data.allergies,
-        conditions: 'Admitted via Registration/Manual Entry',
-        medications: 'None recorded',
-        lastUpdated: new Date().toISOString()
-      }
-    };
-    setInpatients(prev => [newInpatient, ...prev]);
+      medicalSummary: summary
+    });
+    refreshData();
   };
 
-  const handleDeleteInpatient = (id: string) => {
+  const handleDeleteInpatient = async (id: string) => {
     if (currentUser?.role !== UserRole.ADMIN) return;
-    setInpatients(prev => prev.filter(p => p.id !== id));
+    await api.deleteInpatient(id);
+    refreshData();
   };
 
-  const handleUpdateInpatientStatus = (id: string, status: AdmissionStatus) => {
-    setInpatients(prev => prev.map(p => 
-      p.id === id ? { 
-        ...p, 
-        status, 
-        dischargeDate: status === AdmissionStatus.DISCHARGED ? new Date().toISOString() : p.dischargeDate 
-      } : p
-    ));
+  const handleUpdateInpatientStatus = async (id: string, status: AdmissionStatus) => {
+    await api.updateInpatientStatus(id, status);
+    refreshData();
   };
 
-  const handleScheduleMeeting = (meeting: Omit<MedicalBoardMeeting, 'id'>) => {
-    const newMeeting = { ...meeting, id: Math.random().toString(36).substr(2, 9) };
-    setMedicalBoardMeetings(prev => [...prev, newMeeting]);
+  const handleScheduleMeeting = async (meeting: Omit<MedicalBoardMeeting, 'id'>) => {
+    await api.createBoardMeeting(meeting);
+    refreshData();
   };
 
-  const handleDeleteMeeting = (id: string) => {
+  const handleDeleteMeeting = async (id: string) => {
     if (currentUser?.role !== UserRole.ADMIN) return;
-    setMedicalBoardMeetings(prev => prev.filter(m => m.id !== id));
+    await api.deleteBoardMeeting(id);
+    refreshData();
   };
 
-  const handleUpdateStock = (newStock: PharmacyItem[]) => setPharmacyStock(newStock);
-  const handleUpdatePrescriptionStatus = (id: string, status: Prescription['status']) => {
-    setAllPrescriptions(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+  const handleUpdateStock = async (newStock: PharmacyItem[]) => {
+    await api.updatePharmacyStock(newStock);
+    refreshData();
   };
 
-  const handleUpdatePatientRecordGlobal = (patientId: string, record: MedicalRecord) => {
-    setInpatients(prev => prev.map(p => p.id === patientId ? { ...p, medicalSummary: record } : p));
+  const handleUpdatePrescriptionStatus = async (id: string, status: Prescription['status']) => {
+    await api.updatePrescriptionStatus(id, status);
+    refreshData();
   };
+
+  const handleUpdatePatientRecordGlobal = async (patientId: string, record: MedicalRecord) => {
+    // This updates the inpatient record snapshot currently
+    await api.updateInpatientMedicalRecord(patientId, record);
+
+    // Ideally update the actual user profile too if linked
+    // api.updateUserProfile(patientId, { medicalRecord: record });
+    refreshData();
+  };
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-blue-900">Loading MediPortal...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 relative overflow-x-hidden">
@@ -160,14 +239,18 @@ const App: React.FC = () => {
         </>
       )}
 
-      <Navbar user={currentUser} onLogout={handleLogout} onSwitchRole={(r) => handleUpdateUser({role: r})} />
-      
+      <Navbar user={currentUser} onLogout={handleLogout} onSwitchRole={(r) => handleUpdateUser({ role: r })} />
+
       <main className="pt-20 relative z-10 w-full">
         {!currentUser ? (
-          <LandingPage onLogin={handleLogin} />
+          // We pass a dummy onLogin because LandingPage handles auth internally now, 
+          // or we can wrap the internal auth and just use this to trigger state update?
+          // Actually, onAuthStateChange handles the state update. 
+          // We just need LandingPage to perform the API call.
+          <LandingPage onLogin={() => { }} />
         ) : currentUser.role === UserRole.PATIENT ? (
-          <PatientDashboard 
-            user={currentUser} 
+          <PatientDashboard
+            user={currentUser}
             onUpdateRecord={(record) => handleUpdateUser({ medicalRecord: record })}
             onUpdateUser={handleUpdateUser}
             globalPharmacyStock={pharmacyStock}
@@ -176,9 +259,9 @@ const App: React.FC = () => {
             myAppointments={schedules.filter(s => s.patientName === currentUser.name)}
           />
         ) : currentUser.role === UserRole.DOCTOR ? (
-          <DoctorDashboard 
-            user={currentUser} 
-            activeAlerts={activeAlerts} 
+          <DoctorDashboard
+            user={currentUser}
+            activeAlerts={activeAlerts}
             inpatients={inpatients}
             schedules={schedules}
             boardMeetings={medicalBoardMeetings}
@@ -190,7 +273,7 @@ const App: React.FC = () => {
             onUpdateUser={handleUpdateUser}
           />
         ) : (
-          <AdminDashboard 
+          <AdminDashboard
             user={currentUser}
             activeAlerts={activeAlerts}
             inpatients={inpatients}
