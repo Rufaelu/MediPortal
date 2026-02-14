@@ -1,0 +1,8 @@
+{
+  "name": "MediPortal - Digital Health & Emergency Nexus",
+  "description": "A high-end digital medical record portal with real-time emergency alerting capabilities, featuring a sleek royal blue and white aesthetic.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}
