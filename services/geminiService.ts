@@ -2,9 +2,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { MedicalRecord } from "../types";
 
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
 export const getFirstAidAdvice = async (record: MedicalRecord): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+  if (!API_KEY) {
+    console.warn("Gemini API Key missing");
+    return "Ensure patient airway is clear and monitor vitals until help arrives.";
+  }
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+
   const prompt = `
     You are an emergency medical assistant. 
     A patient has triggered an emergency alert. 
@@ -19,7 +25,7 @@ export const getFirstAidAdvice = async (record: MedicalRecord): Promise<string> 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
     });
     return response.text || "No AI advice available at this time.";
@@ -30,8 +36,11 @@ export const getFirstAidAdvice = async (record: MedicalRecord): Promise<string> 
 };
 
 export const analyzeSymptoms = async (symptoms: string, record: MedicalRecord): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+  if (!API_KEY) {
+    return "AI Service Unavailable (Missing Key)";
+  }
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+
   const prompt = `
     You are a hospital information assistant. A patient is reporting the following symptoms: "${symptoms}".
     Their medical context: ${record.conditions}, Allergies: ${record.allergies}.
@@ -44,7 +53,7 @@ export const analyzeSymptoms = async (symptoms: string, record: MedicalRecord): 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: prompt,
     });
     return response.text || "Information unavailable.";
