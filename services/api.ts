@@ -273,7 +273,7 @@ export const api = {
         const { data, error } = await supabase.from('schedules').select('*');
         if (error) throw error;
 
-        return data.map((s: any) => ({
+        return (data || []).map((s: any) => ({
             id: s.id,
             title: s.title,
             time: s.time_string,
@@ -283,17 +283,52 @@ export const api = {
         }));
     },
 
-    createSchedule: async (schedule: Omit<ScheduleItem, 'id'>, doctorId: string) => {
-        await supabase.from('schedules').insert({
+    // Fetch doctors (profiles with role DOCTOR)
+    getDoctors: async (): Promise<{ id: string; name: string }[]> => {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, name, role')
+            .eq('role', 'DOCTOR');
+        if (error) throw error;
+        return (data || []).map((d: any) => ({ id: d.id, name: d.name }));
+    },
+
+    createSchedule: async (
+        schedule: Omit<ScheduleItem, 'id'>,
+        doctorId: string,
+        patientId?: string
+    ) => {
+        const payload: any = {
             doctor_id: doctorId,
             title: schedule.title,
             time_string: schedule.time,
             type: schedule.type,
             patient_name: schedule.patientName,
             location: schedule.location
-        });
+        };
+        if (patientId) payload.patient_id = patientId;
+        await supabase.from('schedules').insert(payload);
     },
+updateSchedule: async (scheduleId: string, updates: Partial<ScheduleItem>) => {
+    const { data, error } = await supabase
+        .from('schedules')
+        .update({
+            time_string: updates.time,          // optional, just in case
+            title: updates.title,               // optional
+            type: updates.type,                 // optional
+            patient_name: updates.patientName,  // optional
+            location: updates.location,         // optional
+            status: updates.status              // mark as "COMPLETED"
+        })
+        .eq('id', scheduleId);
 
+    if (error) {
+        console.error('Failed to update schedule:', error);
+        throw error;
+    }
+
+    return data;
+},
     // Board Meetings
     getBoardMeetings: async (): Promise<MedicalBoardMeeting[]> => {
         const { data, error } = await supabase.from('board_meetings').select('*');
