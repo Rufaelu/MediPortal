@@ -92,6 +92,7 @@ export interface ScheduleItem {
   type: 'SURGERY' | 'CONSULTATION' | 'ROUNDS' | 'BREAK';
   patientName?: string;
   location: string;
+  status: "UPCOMING" | "DONE";
 }
 
 export interface MedicalBoardMeeting {

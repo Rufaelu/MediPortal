@@ -235,6 +235,23 @@ const App: React.FC = () => {
     await api.updatePrescriptionStatus(id, status);
     refreshData();
   };
+const handleMarkScheduleDone = async (id: string) => {
+  try {
+    // Call supabase API
+    await api.updateSchedule(id, { status: "DONE" });
+   
+    // Update local state for immediate UI feedback
+    setSchedules(prev =>
+      prev.map(s =>
+        s.id === id ? { ...s, status: "DONE" } : s
+      )
+    );
+    // refreshData();
+  } catch (err) {
+    console.error('Error marking schedule as done:', err);
+    // Optionally: show toast / alert to the doctor
+  }
+};
 
   const handleUpdatePatientRecordGlobal = async (patientId: string, record: MedicalRecord) => {
     // This updates the inpatient record snapshot currently
@@ -299,6 +316,8 @@ const App: React.FC = () => {
             activeAlerts={activeAlerts}
             inpatients={inpatients}
             schedules={schedules}
+            onMarkScheduleDone={handleMarkScheduleDone}
+
             boardMeetings={medicalBoardMeetings}
             onCreateEmergency={handleCreateEmergency}
             onAdmitPatient={handleAdmitPatient}
